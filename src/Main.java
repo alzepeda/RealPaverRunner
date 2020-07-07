@@ -208,6 +208,16 @@ public class Main {
 
     public static void subproblemsFromFile(String fileName,ArrayList<String>[] constraintGroupList){
         try {
+            int subproblemsSize = 0;
+            if(fileName.contains("20000")){
+                subproblemsSize = 20000/SUBPROBLEMSNUMBER;
+            }else if(fileName.contains("2000")){
+                subproblemsSize = 2000/SUBPROBLEMSNUMBER;
+            }else if(fileName.contains("200")){
+                subproblemsSize = 200/SUBPROBLEMSNUMBER;
+            }else if(fileName.contains("20")){
+                subproblemsSize = 20/SUBPROBLEMSNUMBER;
+            }
             BufferedReader myBufferedReader = new BufferedReader(new FileReader(fileName));
             String line;
             for(int i = 0; i < SUBPROBLEMSNUMBER; i++) {
@@ -221,8 +231,12 @@ public class Main {
                     startOfConstraintsList = true;
                 }
                 if (startOfConstraintsList && line.contains("x")) {
+                    if(counter/subproblemsSize < SUBPROBLEMSNUMBER) {
+                        constraintGroupList[counter / subproblemsSize].add(line);
+                    }else{
+                        constraintGroupList[SUBPROBLEMSNUMBER-1].add(line);
+                    }
                     counter += 1;
-                    constraintGroupList[counter/SUBPROBLEMSNUMBER].add(line);
                 }
                 if (startOfConstraintsList && line.contains(";")) {
                     break;
