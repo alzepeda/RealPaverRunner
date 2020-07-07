@@ -38,7 +38,7 @@ public class Main {
         subproblemsFromFile(oldFileName, constraintGroupList);
 
         //create a place to store solutions
-        ArrayList<String> solutions = new ArrayList();
+        Queue<HashMap> solutions = new LinkedList<HashMap>();
 
         //create a string with the first few lines of text
         String constants = constantsFromFile(oldFileName);
@@ -50,10 +50,8 @@ public class Main {
         try {
             while (!domainQueue.isEmpty()) {
                 HashMap<String,float[]> domain = domainQueue.remove();
-                //copy domain into an easier data structure where you can modify after each round
                 //subproblem loop
                 for (int i = 0; i < SUBPROBLEMSNUMBER; i++) {
-                    //create new file (preferably no random names, so they get reused)
                     fileNumber += 1;
                     newFileName = "NewFiles/"+ fileNumber + ".txt";
                     myBufferedWriter = new BufferedWriter(new FileWriter(newFileName));
@@ -62,8 +60,6 @@ public class Main {
                     //copy domain to new file
                     myBufferedWriter.write("\nVARIABLES\n");
                     int entryCounter = 0;
-
-                    //it doesn't write the domain to the file the 2+ time
                     for (Map.Entry variableDomain : domain.entrySet()) {
                         entryCounter += 1;
                         String key = (String) variableDomain.getKey();
@@ -82,15 +78,94 @@ public class Main {
                     }
                     myBufferedWriter.close();
 
-                    //run realpaver on the file then save the domains found as a new domain
-                    //check precision if this is is the last group
-                    domain = domainsFromOutput("realpaver " + newFileName,
-                            (0 == (fileNumber)%SUBPROBLEMSNUMBER), domainQueue, domain.size());
+                    int variableCount = domain.size();
+                    domain.clear();
+
+                    Process p = Runtime.getRuntime().exec("realpaver " + newFileName);
+                    InputStream s = p.getInputStream();
+                    BufferedReader myBufferedReader = new BufferedReader(new InputStreamReader(s));
+                    String line, variable;
+                    boolean startOfOuterBox = false;
+                    while ((line = myBufferedReader.readLine()) != null) {
+                        line.toUpperCase();
+                        if (line.contains("INITIAL BOX")) {
+                            startOfOuterBox = false;
+                        }
+                        if (line.contains("OUTER BOX")) {
+                            startOfOuterBox = true;
+                        }
+                        float start, end;
+                        //add each domain from the output
+                        if (startOfOuterBox && line.contains("x")) {
+                            variable = line.substring(line.indexOf("x"), line.indexOf(" i"));
+                            start = Float.valueOf(line.substring(line.indexOf("[") + 1, line.indexOf(",")));
+                            end = Float.valueOf(line.substring(line.indexOf(",") + 1, line.indexOf("]")));
+                            float[] range = {start, end};
+                            domain.put(variable, range);
+                        }
+                        //if not the last constraint set, stop when you reach ;
+                        if ((fileNumber%SUBPROBLEMSNUMBER!=0) && startOfOuterBox && line.contains(";")) {
+                            break;
+                        }
+                        //if the last in the constraint set, continue after all variables added to domain
+                        float precision;
+                        if ((fileNumber%SUBPROBLEMSNUMBER==0) && startOfOuterBox && line.contains("precision")) {
+                            precision = Float.valueOf(line.substring(line.indexOf(":") + 2, line.indexOf(",")));
+                            //if precision is too big we have to find a variable to disect
+                            if (precision > 10e-4) {
+                                System.out.println("precision too large, we divide the domain");
+                                //go through the domainList (just created), look for the variable and replace it with
+                                //the first half then add it to domain queue
+                                int counter = 0;
+                                //copy the domain to have two domains to add to the queue
+                                HashMap<String,float[]> domain2 = new HashMap<String,float[]>();
+                                for (Map.Entry variableName : domain.entrySet()) {
+                                    variable = (String) variableName.getKey();
+                                    float[] range = (float[])variableName.getValue();
+                                    domain2.put(variable,range);
+                                }
+                                //split a random variable's range in half
+                                Random rand = new Random();
+                                int variableToDissect = rand.nextInt(variableCount - 1);
+                                for (Map.Entry variableName : domain.entrySet()) {
+                                    if (counter == variableToDissect) {
+                                        variable = (String) variableName.getKey();
+                                        float[] range = (float[])variableName.getValue();
+                                        float midpoint = (range[1]-range[0])/2;
+                                        domain.remove(variable);
+                                        domain2.remove(variable);
+                                        domain.put(variable,range);
+                                        float[] range2 = {midpoint,range[1]};
+                                        range[1] = midpoint;
+                                        domain2.put(variable,range2);
+                                        domain.put(variable,range);
+                                    }
+                                }
+                                domainQueue.add(domain);
+                                domainQueue.add(domain2);
+                            }else{
+                                //when precision is small enough, add solution to our queue for solutions
+                                solutions.add(domain);
+                            }
+                        }
+                    }
                 }
             }
         }catch(IOException e){
-
+            System.out.println(e.getMessage());
         }
+        int solutionNumber = 0;
+        while(!solutions.isEmpty()) {
+            solutionNumber += 1;
+            System.out.println("Solution number: " + solutionNumber);
+            HashMap<String, float[]> solution = solutions.remove();
+            for (Map.Entry solutionDomain : solution.entrySet()) {
+                String key = (String) solutionDomain.getKey();
+                float[] range = (float[]) solutionDomain.getValue();
+                System.out.println(key + " in [" + range[0] + ", " + range[1] + "]");
+            }
+        }
+        System.out.println();
     }
 
     public static HashMap<String,float[]> domainsFromFile(String fileName){
@@ -123,51 +198,6 @@ public class Main {
                 System.out.println(key + " : [" + range[0] + "," + range[1] + "]");
             }
              */
-        }catch(FileNotFoundException e){
-            System.out.println(e.getMessage());
-        }catch(IOException e){
-            System.out.println(e.getMessage());
-        }
-        return domainList;
-    }
-
-    public static HashMap<String,float[]> domainsFromOutput(String commandName, boolean lastInConstraintSet,
-                                                            Queue<HashMap> domainQueue, int variableCount){
-        HashMap<String, float[]> domainList = new HashMap<>();
-        try {
-            Process p = Runtime.getRuntime().exec(commandName);
-            InputStream s = p.getInputStream();
-            BufferedReader myBufferedReader = new BufferedReader(new InputStreamReader(s));
-            String line, variable;
-            boolean startOfVariablesList = false;
-            while ((line = myBufferedReader.readLine()) != null) {
-                line.toUpperCase();
-                if (line.contains("INITIAL BOX")) {
-                    startOfVariablesList = false;
-                }
-                if (line.contains("OUTER BOX")) {
-                    startOfVariablesList = true;
-                }
-                float start, end;
-                if (startOfVariablesList && line.contains("x")) {
-                    variable = line.substring(line.indexOf("x"), line.indexOf(" i"));
-                    start = Float.valueOf(line.substring(line.indexOf("[") + 1, line.indexOf(",")));
-                    end = Float.valueOf(line.substring(line.indexOf(",") + 1, line.indexOf("]")));
-                    float[] range = {start, end};
-                    domainList.put(variable, range);
-                }
-                if (!lastInConstraintSet && startOfVariablesList && line.contains(";")) {
-                    break;
-                }
-                float precision = (float) 1.6e4;
-                if (startOfVariablesList && line.contains("precision")) {
-                    precision = Float.valueOf(line.substring(line.indexOf(":")+2, line.indexOf(",")));
-                    if(precision > 10e-4){
-                        Random rand = new Random();
-                        rand.nextInt(variableCount);
-                    }
-                }
-            }
         }catch(FileNotFoundException e){
             System.out.println(e.getMessage());
         }catch(IOException e){
