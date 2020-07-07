@@ -8,9 +8,27 @@ public class Main {
     static final int SUBPROBLEMSNUMBER = 5;
     static int fileNumber = 0;
 
-    public static void main(String[]args){
-        String oldFileName = "RP_files/logistic_eq/eqs/AM_s=0/logistic_equationN=20.txt";
+    public static void main(String[] args){
+        long start = System.currentTimeMillis();
+        constraintGrouper( "RP_files/logistic_eq/eqs/AM_s=0/logistic_equationN=20.txt");
+        long end = System.currentTimeMillis();
+        System.out.println("It took "+ (end-start) + " milliseconds to complete the run while grouping constraints");
 
+        start = System.currentTimeMillis();
+        regularRunner( "RP_files/logistic_eq/eqs/AM_s=0_branching/logistic_equationN=20.txt");
+        end = System.currentTimeMillis();
+        System.out.println("It took "+ (end-start) + " milliseconds to complete the run without grouping constraints");
+    }
+
+    public static void regularRunner(String oldFileName){
+        try{
+            Runtime.getRuntime().exec("realpaver "+oldFileName);
+        }catch(IOException e){
+            System.out.println("error: " + e.getMessage());
+        }
+    }
+
+    public static void constraintGrouper(String oldFileName){
         //create a hashmap to list of domain and add hashmap to queue
         Queue<HashMap> domainQueue = new LinkedList<HashMap>();
         domainQueue.add(domainsFromFile(oldFileName));
@@ -47,7 +65,6 @@ public class Main {
 
                     //it doesn't write the domain to the file the 2+ time
                     for (Map.Entry variableDomain : domain.entrySet()) {
-                        System.out.println("hi");
                         entryCounter += 1;
                         String key = (String) variableDomain.getKey();
                         float[] range = (float[]) variableDomain.getValue();
@@ -66,14 +83,10 @@ public class Main {
                     myBufferedWriter.close();
 
                     //run realpaver on the file then save the domains found as a new domain
-                    domain = domainsFromOutput("realpaver " + newFileName);
-                    for (Map.Entry domainItem : domain.entrySet()) {
-                        String key = (String) domainItem.getKey();
-                        float[] range = (float[]) domainItem.getValue();
-                        System.out.println(key + " : [" + range[0] + "," + range[1] + "]");
-                    }
+                    //check precision if this is is the last group
+                    domain = domainsFromOutput("realpaver " + newFileName,
+                            (0 == (fileNumber)%SUBPROBLEMSNUMBER), domainQueue, domain.size());
                 }
-                //check precision, then divide the domain or send it to a list of solutions
             }
         }catch(IOException e){
 
@@ -118,17 +131,16 @@ public class Main {
         return domainList;
     }
 
-    public static HashMap<String,float[]> domainsFromOutput(String commandName){
+    public static HashMap<String,float[]> domainsFromOutput(String commandName, boolean lastInConstraintSet,
+                                                            Queue<HashMap> domainQueue, int variableCount){
         HashMap<String, float[]> domainList = new HashMap<>();
         try {
-            System.out.println(commandName);
             Process p = Runtime.getRuntime().exec(commandName);
             InputStream s = p.getInputStream();
             BufferedReader myBufferedReader = new BufferedReader(new InputStreamReader(s));
             String line, variable;
             boolean startOfVariablesList = false;
             while ((line = myBufferedReader.readLine()) != null) {
-                System.out.println(line);
                 line.toUpperCase();
                 if (line.contains("INITIAL BOX")) {
                     startOfVariablesList = false;
@@ -144,15 +156,17 @@ public class Main {
                     float[] range = {start, end};
                     domainList.put(variable, range);
                 }
-                if (startOfVariablesList && line.contains(";")) {
+                if (!lastInConstraintSet && startOfVariablesList && line.contains(";")) {
                     break;
                 }
-            }
-
-            for (Map.Entry domain : domainList.entrySet()) {
-                String key = (String) domain.getKey();
-                float[] range = (float[]) domain.getValue();
-                System.out.println(key + " : [" + range[0] + "," + range[1] + "]");
+                float precision = (float) 1.6e4;
+                if (startOfVariablesList && line.contains("precision")) {
+                    precision = Float.valueOf(line.substring(line.indexOf(":")+2, line.indexOf(",")));
+                    if(precision > 10e-4){
+                        Random rand = new Random();
+                        rand.nextInt(variableCount);
+                    }
+                }
             }
         }catch(FileNotFoundException e){
             System.out.println(e.getMessage());
